@@ -96,8 +96,10 @@ static void zmalloc_default_oom(size_t size) {
     abort();
 }
 
+// 定义了一个全局静态函数指针zmalloc_oom_handler，指向处理内存分配失败的函数zmalloc_default_oom
 static void (*zmalloc_oom_handler)(size_t) = zmalloc_default_oom;
 
+// 对malloc的函数封装
 void *zmalloc(size_t size) {
     ASSERT_NO_SIZE_OVERFLOW(size);
     void *ptr = malloc(size+PREFIX_SIZE);

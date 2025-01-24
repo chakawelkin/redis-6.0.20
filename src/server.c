@@ -2542,10 +2542,12 @@ int restartServer(int flags, mstime_t delay) {
 static void readOOMScoreAdj(void) {
 #ifdef HAVE_PROC_OOM_SCORE_ADJ
     char buf[64];
+    // 只读模式打开oom_score_adj文件
     int fd = open("/proc/self/oom_score_adj", O_RDONLY);
 
     if (fd < 0) return;
     if (read(fd, buf, sizeof(buf)) > 0)
+        // 将字符串转换为整数
         server.oom_score_adj_base = atoi(buf);
     close(fd);
 #endif
@@ -2830,24 +2832,31 @@ void makeThreadKillable(void) {
 void initServer(void) {
     int j;
 
+    // 忽略SIGHUP信号，不会由控制终端关闭而停止服务
     signal(SIGHUP, SIG_IGN);
+    // 忽略SIGPIPE，当进程向一个已经关闭的管道或套接字写入数据时，会收到SIGPIPE信号，这样可以避免该情况下的进程终止
     signal(SIGPIPE, SIG_IGN);
+    // 为不同的信号注册相应的处理程序，以实现特定的功能
     setupSignalHandlers();
+    // 设置线程为可终止状态
     makeThreadKillable();
 
+    //
     if (server.syslog_enabled) {
+        // 打开系统日志记录
         openlog(server.syslog_ident, LOG_PID | LOG_NDELAY | LOG_NOWAIT,
             server.syslog_facility);
     }
 
     /* Initialization after setting defaults from the config system. */
     server.aof_state = server.aof_enabled ? AOF_ON : AOF_OFF;
-    server.hz = server.config_hz;
-    server.pid = getpid();
-    server.in_fork_child = CHILD_TYPE_NONE;
-    server.main_thread_id = pthread_self();
-    server.current_client = NULL;
-    server.fixed_time_expire = 0;
+    server.hz = server.config_hz; // 服务器调度频率
+    server.pid = getpid(); // 进程id
+    server.in_fork_child = CHILD_TYPE_NONE; // 子进程类型
+    server.main_thread_id = pthread_self(); // 获取主线程id
+    server.current_client = NULL; // 当前客户端指针
+    server.fixed_time_expire = 0; //
+    /* 以下是各种列表和字典的初始化 */
     server.clients = listCreate();
     server.clients_index = raxNew();
     server.clients_to_close = listCreate();
@@ -2861,29 +2870,35 @@ void initServer(void) {
     server.ready_keys = listCreate();
     server.clients_waiting_acks = listCreate();
     server.get_ack_from_slaves = 0;
-    server.clients_paused = 0;
-    server.events_processed_while_blocked = 0;
-    server.system_memory_size = zmalloc_get_memory_size();
+    server.clients_paused = 0; // 客户端暂停标志初始化
+    server.events_processed_while_blocked = 0;// 阻塞期间处理的事件计数初始化
+    server.system_memory_size = zmalloc_get_memory_size(); // 获取当前系统中由redis分配的内存大小
 
+    // 若开启了tls配置，则调用tlsConfigure进行tls的配置
     if ((server.tls_port || server.tls_replication || server.tls_cluster)
                 && tlsConfigure(&server.tls_ctx_config) == C_ERR) {
         serverLog(LL_WARNING, "Failed to configure TLS. Check logs for more info.");
         exit(1);
     }
 
+    // 创建redis服务器使用的共享对象，避免重复创建带来的内存开销和性能损耗
     createSharedObjects();
+    // 调整系统允许该进程打开的文件描述符数量限制
     adjustOpenFilesLimit();
-    server.el = aeCreateEventLoop(server.maxclients+CONFIG_FDSET_INCR);
+    // 创建一个事件循环对象
+    server.el = aeCreateEventLoop(server.maxclients + CONFIG_FDSET_INCR);
     if (server.el == NULL) {
         serverLog(LL_WARNING,
             "Failed creating the event loop. Error message: '%s'",
             strerror(errno));
         exit(1);
     }
-    server.db = zmalloc(sizeof(redisDb)*server.dbnum);
+    // 为redis的数据库结构体分配内存空间
+    server.db = zmalloc(sizeof(redisDb) * server.dbnum);
 
     /* Open the TCP listening socket for the user commands. */
     if (server.port != 0 &&
+        // 让服务器监听指定的端口
         listenToPort(server.port,server.ipfd,&server.ipfd_count) == C_ERR)
         exit(1);
     if (server.tls_port != 0 &&
@@ -5210,6 +5225,7 @@ void redisOutOfMemoryHandler(size_t allocation_size) {
         allocation_size);
 }
 
+// 设置进程标题
 void redisSetProcTitle(char *title) {
 #ifdef USE_SETPROCTITLE
     char *server_mode = "";
@@ -5301,6 +5317,7 @@ int main(int argc, char **argv) {
     struct timeval tv;
     int j;
 
+// 如果定义了宏REDIS_TEST
 #ifdef REDIS_TEST
     if (argc == 3 && !strcasecmp(argv[1], "test")) {
         if (!strcasecmp(argv[2], "ziplist")) {
@@ -5331,8 +5348,10 @@ int main(int argc, char **argv) {
 #ifdef INIT_SETPROCTITLE_REPLACEMENT
     spt_init(argc, argv);
 #endif
+    // 设置时区，使用系统的本地化环境
     setlocale(LC_COLLATE,"");
-    tzset(); /* Populates 'timezone' global. */
+    tzset(); /* Populates 'timezone' global. 初始化或更新程序的时区设置 */
+    // 设置内存分配时的回调处理函数
     zmalloc_set_oom_handler(redisOutOfMemoryHandler);
     srand(time(NULL)^getpid());
     gettimeofday(&tv,NULL);
@@ -5345,10 +5364,14 @@ int main(int argc, char **argv) {
      */
     umask(server.umask = umask(0777));
 
+    // 设置随机种子
     uint8_t hashseed[16];
     getRandomBytes(hashseed,sizeof(hashseed));
     dictSetHashFunctionSeed(hashseed);
+
+    // 检查哨兵模式
     server.sentinel_mode = checkForSentinelMode(argc,argv);
+    // 为各种参数设置默认值
     initServerConfig();
     ACLInit(); /* The ACL subsystem must be initialized ASAP because the
                   basic networking code and client creation depends on it. */
@@ -5358,6 +5381,7 @@ int main(int argc, char **argv) {
     /* Store the executable path and arguments in a safe place in order
      * to be able to restart the server later. */
     server.executable = getAbsolutePath(argv[0]);
+    // 保存命令行参数
     server.exec_argv = zmalloc(sizeof(char*)*(argc+1));
     server.exec_argv[argc] = NULL;
     for (j = 0; j < argc; j++) server.exec_argv[j] = zstrdup(argv[j]);
@@ -5365,14 +5389,16 @@ int main(int argc, char **argv) {
     /* We need to init sentinel right now as parsing the configuration file
      * in sentinel mode will have the effect of populating the sentinel
      * data structures with master nodes to monitor. */
+    // 判断是否设置为哨兵模式
     if (server.sentinel_mode) {
-        initSentinelConfig();
-        initSentinel();
+        initSentinelConfig(); // 初始化哨兵的配置
+        initSentinel(); // 初始化哨兵模式
     }
 
     /* Check if we need to start in redis-check-rdb/aof mode. We just execute
      * the program main. However the program is part of the Redis executable
      * so that we can easily execute an RDB check on loading errors. */
+    // 如果运行的是redis-check-rdb程序，调用redis_check_rdb_main函数检测RDB文件
     if (strstr(argv[0],"redis-check-rdb") != NULL)
         redis_check_rdb_main(argc,argv,NULL);
     else if (strstr(argv[0],"redis-check-aof") != NULL)
@@ -5444,6 +5470,7 @@ int main(int argc, char **argv) {
         sdsfree(options);
     }
 
+    // 以下用来决策是否以守护进程模式运行
     server.supervised = redisIsSupervised(server.supervised_mode);
     int background = server.daemonize && !server.supervised;
     if (background) daemonize();
@@ -5463,13 +5490,20 @@ int main(int argc, char **argv) {
         serverLog(LL_WARNING, "Configuration loaded");
     }
 
+    // 读取当前进程的OOM分数调整值，并将读取到的值存储在oom_score_adj_base里
     readOOMScoreAdj();
+    // 初始化服务
     initServer();
+    // 如果是守护进程或配置了PID文件路径，则创建PID文件
     if (background || server.pidfile) createPidFile();
+    // 设置当前redis服务进程的标题，argv[0]是命令行参数，通常是redis-server的可执行文件名
     redisSetProcTitle(argv[0]);
+    // 服务器启动时，输出redis的ascii格式的logo
     redisAsciiArt();
+    // 检查和调整TCP连接的积压队列设置，如果设置的值超过了somaxconn，那么就warning
     checkTcpBacklogSettings();
 
+    // 非哨兵模式
     if (!server.sentinel_mode) {
         /* Things not needed when running in Sentinel mode. */
         serverLog(LL_WARNING,"Server initialized");
@@ -5492,10 +5526,15 @@ int main(int argc, char **argv) {
         }
     #endif /* __arm64__ */
     #endif /* __linux__ */
+        // 加载redis扩展模块
         moduleLoadFromQueue();
+        // 加载ACL访问控制用户列表
         ACLLoadUsersAtStartup();
+        // 执行服务器的最后初始化操作
         InitServerLast();
+        // 从磁盘加载数据到内存中
         loadDataFromDisk();
+        // 判断是否开启集群模式
         if (server.cluster_enabled) {
             if (verifyClusterConfigWithData() == C_ERR) {
                 serverLog(LL_WARNING,
@@ -5504,10 +5543,13 @@ int main(int argc, char **argv) {
                 exit(1);
             }
         }
+        // ipfd_count表示服务器监听的普通tcp套接字文件描述符数量，tlsfd_count表示监听的TLS套接字文件描述符数量
         if (server.ipfd_count > 0 || server.tlsfd_count > 0)
             serverLog(LL_NOTICE,"Ready to accept connections");
+        // unix域套接字文件描述符
         if (server.sofd > 0)
             serverLog(LL_NOTICE,"The server is now ready to accept connections at %s", server.unixsocket);
+        // 判断redis服务是否由systemd管理
         if (server.supervised_mode == SUPERVISED_SYSTEMD) {
             if (!server.masterhost) {
                 redisCommunicateSystemd("STATUS=Ready to accept connections\n");
@@ -5530,10 +5572,14 @@ int main(int argc, char **argv) {
         serverLog(LL_WARNING,"WARNING: You specified a maxmemory value that is less than 1MB (current value is %llu bytes). Are you sure this is what you really want?", server.maxmemory);
     }
 
+    // 设置redis服务进程的cpu亲和性，指的是将进程绑定到特定的cpu核心上运行
     redisSetCpuAffinity(server.server_cpulist);
+    // 将redis进程的OOM分数值调整为-1，降低当系统内存不足时redis进程被os kill的几率
     setOOMScoreAdj(-1);
-
+    // server.el是服务器使用的事件循环对象，实现I/O多路复用
+    // 启动redis的事件循环，使服务器开始处理客户端的连接请求、命令执行、定时任务等操作
     aeMain(server.el);
+    // 当事件循环结束时，清理事件循环对象所占用的资源
     aeDeleteEventLoop(server.el);
     return 0;
 }
